@@ -1,0 +1,15 @@
+---
+title: "GLMM simulation project"
+author: "Jacob M. Maronge"
+date: "12/26/2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+##Notes on Paper: Separating between- and within-cluster covariate effects by using conditional and partitioning methods
+
+- When the random effects are correlated with covariates in the model, you can get inconsistent estimators. 
+- two examples: 
+1. first example concerns treatment of newborns for jaundice and consists of 1722 babies born at 12 centres in the Northern California Kaiser Permanente Health System. (Number of samples within cluster much bigger than number of clusters)
+2. consists of birth weights of babies from 878 mothers in Georgia, all of whom had five births. (Number of clusters way larger than number within cluster)
