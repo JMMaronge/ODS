@@ -90,7 +90,7 @@ Looking back at my notes, I'm not fully sure what to do from here. I have a note
 \newpage
 
 ###Updated Simulation
-
+####Discrete X
 I've updated the model I'm studying, now we have,
 
 $$Y_{ij}= \beta_0 +\beta X_{ij}+U_i+\epsilon_{ij}.$$
@@ -115,7 +115,10 @@ reps=10000
 
 
 beta.diff.est<-vector(length = reps)
+beta.diff.cov.prob<-vector(length = reps)
 beta.x_ibar.est<-vector(length = reps)
+beta.x_ibar.cov.prob<-vector(length = reps)
+
 for(i in 1:reps){
 u<-rnorm(pop.m,mean = 0, sd=sqrt(sigma*tau_e)) #cluster samples
 u1<-rep(u,each=pop.n) # repeat each cluster sample n times
@@ -138,16 +141,82 @@ samp.dat$diff<-samp.dat$x-samp.dat$x_ibar # calculate x_ij-x_ibar
 
 fit<-lme(y~diff+x_ibar, data = samp.dat, random = ~1|id)
 beta.diff.est[i]<-fixed.effects(fit)[2]
+beta.diff.cov.prob[i]<-(intervals(fit)$fixed[2,1]<=beta&intervals(fit)$fixed[2,3]>=beta)
 beta.x_ibar.est[i]<-fixed.effects(fit)[3]
+beta.x_ibar.cov.prob[i]<-(intervals(fit)$fixed[3,1]<=beta&intervals(fit)$fixed[3,3]>=beta)
 }
+```
 
+```{r,echo=TRUE}
 hist(beta.diff.est)
+abline(v = 5, col = "red")
+mean(beta.diff.cov.prob)
 hist(beta.x_ibar.est)
+abline(v = 5, col = "red")
+mean(beta.x_ibar.cov.prob)
+```
+
+####Continuous X
+Here I generate the same model as above, except I don't convert the X's to discrete values.
+
+```{r, echo=TRUE, cache=TRUE}
+library(nlme)
+set.seed(1104)
+
+pop.m<-20000 # number of clusters
+pop.n<- 5 # number within clusters
+beta<-5 #slope for indicator 
+sigma<- 1 #overall standard deviation in the linear model
+tau_e<-0.8 #error correlation
+reps=10000
+
+
+beta.diff.est<-vector(length = reps)
+beta.diff.cov.prob<-vector(length = reps)
+beta.x_ibar.est<-vector(length = reps)
+beta.x_ibar.cov.prob<-vector(length = reps)
+
+for(i in 1:reps){
+u<-rnorm(pop.m,mean = 0, sd=sqrt(sigma*tau_e)) #cluster samples
+u1<-rep(u,each=pop.n) # repeat each cluster sample n times
+estar<-rnorm(pop.m*pop.n,mean = 0, sd=sqrt(sigma*(1-tau_e))) # samples within each cluster
+err<-u1+estar #total error
+
+x<-rnorm(u1,1)
+y<-beta*x+err
+dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
+agg.dat<-aggregate(y~id, dat, sum) # sum y by id
+case.samp<-sample(agg.dat$id[agg.dat$y>12],50) #sample cases
+control.samp<-sample(agg.dat$id[agg.dat$y<12],50)# sample controls
+samp<-c(case.samp, control.samp)
+samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
+samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
+x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
+samp.dat$x_ibar<-x_ibar
+samp.dat$diff<-samp.dat$x-samp.dat$x_ibar # calculate x_ij-x_ibar
+
+fit<-lme(y~diff+x_ibar, data = samp.dat, random = ~1|id)
+beta.diff.est[i]<-fixed.effects(fit)[2]
+beta.diff.cov.prob[i]<-(intervals(fit)$fixed[2,1]<=beta&intervals(fit)$fixed[2,3]>=beta)
+beta.x_ibar.est[i]<-fixed.effects(fit)[3]
+beta.x_ibar.cov.prob[i]<-(intervals(fit)$fixed[3,1]<=beta&intervals(fit)$fixed[3,3]>=beta)
+}
+```
+
+```{r, echo=TRUE}
+hist(beta.diff.est)
+abline(v = 5, col = "red")
+mean(beta.diff.cov.prob)
+hist(beta.x_ibar.est)
+abline(v = 5, col = "red")
+mean(beta.x_ibar.cov.prob)
 ```
 
 \newpage
 
 ###Logistic regression simulation 02/05/18
+
+####Discrete X
 
 Since we've done the normal case, we decided to study a logistic model of the form,
 
@@ -201,7 +270,7 @@ beta.int.est<-vector(length = reps)
   hist(agg.dat$y,main = "Histogram of Aggregated Sums",xlab = "Sum of Y Over Subject")
 ```
   
-```{r,echo=TRUE,cache=TRUE}
+```{r,echo=TRUE,cache=TRUE,eval=FALSE}
 library(lme4)
 set.seed(1104)
 
@@ -210,11 +279,14 @@ pop.n<- 5 # number within clusters
 beta1<-3 #slope for indicator 
 beta0<--1.5 #intercept terms
 tau_sq<-.5 #variance of random intercept
-reps<-10000 
+reps<-10000
 
 beta.diff.est<-vector(length = reps)
+beta.diff.cov.prob<-vector(length = reps)
 beta.x_ibar.est<-vector(length = reps)
+beta.x_ibar.cov.prob<-vector(length = reps)
 beta.int.est<-vector(length = reps)
+beta.int.cov.prob<-vector(length = reps)
 for(i in 1:reps){
   u<-rnorm(pop.m,mean = 0, sd=sqrt(tau_sq)) #cluster samples
   u1<-rep(u,each=pop.n) # repeat each cluster sample n times
@@ -238,23 +310,132 @@ for(i in 1:reps){
                    family = binomial(link = "logit"), 
                    glmerControl(optimizer = c("bobyqa","Nelder_Mead")) )
   beta.int.est[i]<-coef(summary(fit.logit))[1,1]
+  beta.int.cov.prob[i]<-((coef(summary(fit.logit))[1,1]-qt(.975, df=2000)*coef(summary(fit.logit))[1,2])<=beta0&(coef(summary(fit.logit))[1,1]+qt(.975, df=2000)*coef(summary(fit.logit))[1,2])>=beta0)
   beta.diff.est[i]<-coef(summary(fit.logit))[2,1]
+  beta.diff.cov.prob[i]<-((coef(summary(fit.logit))[2,1]-qt(.975, df=2000)*coef(summary(fit.logit))[2,2])<=beta1&(coef(summary(fit.logit))[2,1]+qt(.975, df=2000)*coef(summary(fit.logit))[2,2])>=beta1)
   beta.x_ibar.est[i]<-coef(summary(fit.logit))[3,1]
-}
+  beta.x_ibar.cov.prob[i]<-((coef(summary(fit.logit))[3,1]-qt(.975, df=2000)*coef(summary(fit.logit))[3,2])<=beta1&(coef(summary(fit.logit))[3,1]+qt(.975, df=2000)*coef(summary(fit.logit))[3,2])>=beta1)
+
+  }
 ```
 
-```{r,echo=TRUE}
+```{r,echo=TRUE,eval=FALSE}
 hist(beta.int.est,main = "Histogram of intercept estimates",xlim = c(-1.5,0))
 abline(v = -1.5, col = "red")
+mean(beta.int.cov.prob)
 hist(beta.diff.est, main = "Coefficient of (x_ij-x_ibar) estimates")
 abline(v = 3, col = "red")
+mean(beta.diff.cov.prob)
 hist(beta.x_ibar.est, main = "Coefficient of x_ibar Estimates")
 abline(v = 3, col = "red")
+mean(beta.int.cov.prob)
 ```
 
 The vertical red lines are drawn at the true value for each parameter. The intercept term appears to be biased, as well as the between-subject effect, and possibly also the within-subject effect.
 
-####Conditional logistic regression
+####Continuous X
+
+Here I generate the same model as above, except I don't convert the X's to discrete values.
+
+Below, I show some plots from one repetition of my simulation. 
+
+```{r,echo=FALSE}
+library(lme4)
+set.seed(1104)
+
+pop.m<-20000 # number of clusters
+pop.n<- 5 # number within clusters
+beta1<-3 #slope for indicator 
+beta0<--1.5 #intercept terms
+tau_sq<-0.5 #variance of random intercept
+reps=10000
+beta.diff.est<-vector(length = reps)
+beta.x_ibar.est<-vector(length = reps)
+beta.int.est<-vector(length = reps)
+  u<-rnorm(pop.m,mean = 0, sd=sqrt(tau_sq)) #cluster samples
+  u1<-rep(u,each=pop.n) # repeat each cluster sample n times
+  x<-rnorm(u1,1)
+  z<-beta0+beta1*x+u1
+  pr<-1/(1+exp(-z))
+  y<-rbinom(n=pop.m*pop.n,size = 1,prob = pr )
+  dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
+  agg.dat<-aggregate(y~id, dat, sum) # sum y by id
+  case.samp<-sample(agg.dat$id[agg.dat$y>=4],250) #sample cases
+  control.samp<-sample(agg.dat$id[agg.dat$y<4],250)# sample controls
+  samp<-c(case.samp, control.samp)
+  samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
+  samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
+  par(mfrow=c(2,2))
+  hist(x,main="Histogram of X",xlab = "X")
+  hist(pr,main="Histogram of Probabilities",xlab = "Probabilities",xlim = c(0,1))
+  hist(y,main="Histogram of Y",xlab = "Y")
+  hist(agg.dat$y,main = "Histogram of Aggregated Sums",xlab = "Sum of Y Over Subject")
+```
+
+```{r,echo=TRUE,cache=TRUE,eval=FALSE}
+library(lme4)
+set.seed(1104)
+
+pop.m<-80000 # number of clusters
+pop.n<- 5 # number within clusters
+beta1<-3 #slope for indicator 
+beta0<--1.5 #intercept terms
+tau_sq<-.5 #variance of random intercept
+reps<-10000 
+
+beta.diff.est<-vector(length = reps)
+beta.diff.cov.prob<-vector(length = reps)
+beta.x_ibar.est<-vector(length = reps)
+beta.x_ibar.cov.prob<-vector(length = reps)
+beta.int.est<-vector(length = reps)
+beta.int.cov.prob<-vector(length = reps)
+for(i in 1:reps){
+  u<-rnorm(pop.m,mean = 0, sd=sqrt(tau_sq)) #cluster samples
+  u1<-rep(u,each=pop.n) # repeat each cluster sample n times
+  x<-rnorm(u1,1)
+  z<-beta0+beta1*x+u1
+  pr<-1/(1+exp(-z))
+  y<-rbinom(n=pop.m*pop.n,size = 1,prob = pr )
+  dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
+  agg.dat<-aggregate(y~id, dat, sum) # sum y by id
+  case.samp<-sample(agg.dat$id[agg.dat$y>=4],250) #sample cases
+  control.samp<-sample(agg.dat$id[agg.dat$y<4],250)# sample controls
+  samp<-c(case.samp, control.samp)
+  samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
+  samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
+  x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
+  samp.dat$x_ibar<-(x_ibar)
+  samp.dat$diff<-(samp.dat$x-samp.dat$x_ibar) # calculate x_ij-x_ibar
+  
+  fit.logit<-glmer(y~diff+x_ibar+(1|id),data = samp.dat,
+                   family = binomial(link = "logit"), 
+                   glmerControl(optimizer = c("bobyqa","Nelder_Mead")) )
+  beta.int.est[i]<-coef(summary(fit.logit))[1,1]
+  beta.int.cov.prob[i]<-((coef(summary(fit.logit))[1,1]-qt(.975, df=2000)*coef(summary(fit.logit))[1,2])<=beta0&(coef(summary(fit.logit))[1,1]+qt(.975, df=2000)*coef(summary(fit.logit))[1,2])>=beta0)
+  beta.diff.est[i]<-coef(summary(fit.logit))[2,1]
+  beta.diff.cov.prob[i]<-((coef(summary(fit.logit))[2,1]-qt(.975, df=2000)*coef(summary(fit.logit))[2,2])<=beta1&(coef(summary(fit.logit))[2,1]+qt(.975, df=2000)*coef(summary(fit.logit))[2,2])>=beta1)
+  beta.x_ibar.est[i]<-coef(summary(fit.logit))[3,1]
+  beta.x_ibar.cov.prob[i]<-((coef(summary(fit.logit))[3,1]-qt(.975, df=2000)*coef(summary(fit.logit))[3,2])<=beta1&(coef(summary(fit.logit))[3,1]+qt(.975, df=2000)*coef(summary(fit.logit))[3,2])>=beta1)
+
+}
+```
+
+```{r,echo=TRUE,eval=FALSE}
+hist(beta.int.est,main = "Histogram of intercept estimates",xlim = c(-1.5,0))
+abline(v = -1.5, col = "red")
+mean(beta.int.cov.prob)
+hist(beta.diff.est, main = "Coefficient of (x_ij-x_ibar) estimates")
+abline(v = 3, col = "red")
+mean(beta.diff.cov.prob)
+hist(beta.x_ibar.est, main = "Coefficient of x_ibar Estimates")
+abline(v = 3, col = "red")
+mean(beta.int.cov.prob)
+```
+
+###Conditional logistic regression
+
+####Discrete X
+
 
 Below, I show some plots from one repetition of my simulation. 
 
@@ -292,7 +473,7 @@ sigma<-1
 ```
 
 
-```{r, echo=TRUE}
+```{r, echo=TRUE,eval=FALSE}
 set.seed(1104)
 library(survival)
 pop.m<-80000 # number of clusters
@@ -304,8 +485,8 @@ sigma<-1
 reps<-10000
 
 beta.diff.est<-vector(length = reps)
-beta.x_ibar.est<-vector(length = reps)
-beta.int.est<-vector(length = reps)
+beta.diff.cov.prob<-vector(length = reps)
+
 for(i in 1:reps){
   v<-rnorm(pop.m,mean = 0, sd=sqrt(sigma*tau_x)) #cluster samples
   v1<-rep(v,each=pop.n) # repeat each cluster sample n times
@@ -329,10 +510,98 @@ for(i in 1:reps){
   table(samp.dat$diff,samp.dat$y)
   fit.clogit<-clogit(y ~ diff + strata(id), samp.dat)
   beta.diff.est[i]<-coef(fit.clogit)[1]
+  ci<-confint(fit.clogit)
+  beta.diff.cov.prob[i]<-(ci[1,1]<=beta1&ci[1,2]>=beta1)
 }
 ```
 
-```{r,echo=TRUE}
+```{r,echo=TRUE,eval=FALSE}
 hist(beta.diff.est, main = "Estimates of Coefficient (x_ij-x_ibar)")
 abline(v = 3, col = "red")
+mean(beta.diff.cov.prob)
+```
+
+####Continuous X
+
+Below, I show some plots from one repetition of my simulation. 
+
+```{r,echo=FALSE}
+library(survival)
+set.seed(1104)
+
+pop.m<-80000 # number of clusters
+pop.n<- 5 # number within clusters
+beta1<-3 #slope for indicator 
+beta0<--1.5 #intercept terms
+tau_x<-0.5
+sigma<-1
+  v<-rnorm(pop.m,mean = 0, sd=sqrt(sigma*tau_x)) #cluster samples
+  v1<-rep(v,each=pop.n) # repeat each cluster sample n times
+  xstar<-rnorm(pop.m*pop.n,mean = 0, sd=sqrt(sigma*(1-tau_x))) # samples within each cluster
+  x<-v1+xstar #total x
+  x<-as.numeric(x>.75)
+  z<-beta0+beta1*x
+  pr<-1/(1+exp(-z))
+  y<-rbinom(n=pop.m*pop.n,size = 1,prob = pr )
+  dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
+  agg.dat<-aggregate(y~id, dat, sum) # sum y by id
+  table(agg.dat$y)
+  case.samp<-sample(agg.dat$id[agg.dat$y>=4],250) #sample cases
+  control.samp<-sample(agg.dat$id[agg.dat$y<4],250)# sample controls
+  samp<-c(case.samp, control.samp)
+  samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
+  samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
+  par(mfrow=c(2,2))
+  hist(x,main="Histogram of X",xlab = "X")
+  hist(pr,main="Histogram of Probabilities",xlab = "Probabilities",xlim = c(0,1))
+  hist(y,main="Histogram of Y",xlab = "Y")
+  hist(agg.dat$y,main = "Histogram of Aggregated Sums",xlab = "Sum of Y Over Subject")
+```
+
+
+```{r, echo=TRUE,eval=FALSE}
+set.seed(1104)
+library(survival)
+pop.m<-80000 # number of clusters
+pop.n<- 5 # number within clusters
+beta1<-3 #slope for indicator 
+beta0<--1.5 #intercept terms
+tau_x<-0.5
+sigma<-1
+reps<-10000
+
+beta.diff.est<-vector(length = reps)
+beta.diff.cov.prob<-vector(length = reps)
+
+for(i in 1:reps){
+  v<-rnorm(pop.m,mean = 0, sd=sqrt(sigma*tau_x)) #cluster samples
+  v1<-rep(v,each=pop.n) # repeat each cluster sample n times
+  xstar<-rnorm(pop.m*pop.n,mean = 0, sd=sqrt(sigma*(1-tau_x))) # samples within each cluster
+  x<-v1+xstar #total x
+  z<-beta0+beta1*x
+  pr<-1/(1+exp(-z))
+  y<-rbinom(n=pop.m*pop.n,size = 1,prob = pr )
+  dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
+  agg.dat<-aggregate(y~id, dat, sum) # sum y by id
+  table(agg.dat$y)
+  case.samp<-sample(agg.dat$id[agg.dat$y>=4],250) #sample cases
+  control.samp<-sample(agg.dat$id[agg.dat$y<4],250)# sample controls
+  samp<-c(case.samp, control.samp)
+  samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
+  samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
+  x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
+  samp.dat$x_ibar<-(x_ibar)
+  samp.dat$diff<-(samp.dat$x-samp.dat$x_ibar) # calculate x_ij-x_ibar
+  table(samp.dat$diff,samp.dat$y)
+  fit.clogit<-clogit(y ~ diff + strata(id), samp.dat)
+  beta.diff.est[i]<-coef(fit.clogit)[1]
+  ci<-confint(fit.clogit)
+  beta.diff.cov.prob[i]<-(ci[1,1]<=beta1&ci[1,2]>=beta1)
+}
+```
+
+```{r,echo=TRUE,eval=FALSE}
+hist(beta.diff.est, main = "Estimates of Coefficient (x_ij-x_ibar)")
+abline(v = 3, col = "red")
+mean(beta.diff.cov.prob)
 ```
