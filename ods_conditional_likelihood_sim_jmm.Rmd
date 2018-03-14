@@ -270,53 +270,66 @@ beta.int.est<-vector(length = reps)
   hist(agg.dat$y,main = "Histogram of Aggregated Sums",xlab = "Sum of Y Over Subject")
 ```
   
-```{r,echo=TRUE,cache=TRUE,eval=FALSE}
-library(lme4)
+```{r,echo=TRUE,cache=TRUE}
 set.seed(1104)
+library(foreach)
+library(doParallel)
+cl <- makeCluster(3)  #not to overload your computer
+registerDoParallel(cl)
+clusterEvalQ(cl,
+             {library(lme4)
+               pop.m<-80000 # number of clusters
+               pop.n<- 5 # number within clusters
+               beta1<-3 #slope for indicator 
+               beta0<--1.5 #intercept terms
+               tau_sq<-.5 #variance of random intercept
+               logit.sim<-function(pop.m, pop.n, beta1,beta0,tau_sq){
+                 library(lme4)
+                 u<-rnorm(pop.m,mean = 0, sd=sqrt(tau_sq)) #cluster samples
+                 u1<-rep(u,each=pop.n) # repeat each cluster sample n times
+                 x<-rnorm(u1,1)
+                 x<-as.numeric(x>2.5)
+                 z<-beta0+beta1*x+u1
+                 pr<-1/(1+exp(-z))
+                 y<-rbinom(n=pop.m*pop.n,size = 1,prob = pr )
+                 dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
+                 agg.dat<-aggregate(y~id, dat, sum) # sum y by id
+                 case.samp<-sample(agg.dat$id[agg.dat$y>=4],250) #sample cases
+                 control.samp<-sample(agg.dat$id[agg.dat$y<4],250)# sample controls
+                 samp<-c(case.samp, control.samp)
+                 samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
+                 samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
+                 x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
+                 samp.dat$x_ibar<-(x_ibar)
+                 samp.dat$diff<-(samp.dat$x-samp.dat$x_ibar) # calculate x_ij-x_ibar
+                 
+                 fit.logit<-glmer(y~diff+x_ibar+(1|id),data = samp.dat,
+                                  family = binomial(link = "logit"), 
+                                  glmerControl(optimizer = c("bobyqa","Nelder_Mead")) )
+                 
+                 beta.int.est<-coef(summary(fit.logit))[1,1]
+                 beta.int.cov.prob<-((coef(summary(fit.logit))[1,1]-qt(.975, df=2000)*coef(summary(fit.logit))[1,2])<=beta0&(coef(summary(fit.logit))[1,1]+qt(.975, df=2000)*coef(summary(fit.logit))[1,2])>=beta0)
+                 beta.diff.est<-coef(summary(fit.logit))[2,1]
+                 beta.diff.cov.prob<-((coef(summary(fit.logit))[2,1]-qt(.975, df=2000)*coef(summary(fit.logit))[2,2])<=beta1&(coef(summary(fit.logit))[2,1]+qt(.975, df=2000)*coef(summary(fit.logit))[2,2])>=beta1)
+                 beta.x_ibar.est<-coef(summary(fit.logit))[3,1]
+                 beta.x_ibar.cov.prob<-((coef(summary(fit.logit))[3,1]-qt(.975, df=2000)*coef(summary(fit.logit))[3,2])<=beta1&(coef(summary(fit.logit))[3,1]+qt(.975, df=2000)*coef(summary(fit.logit))[3,2])>=beta1)
+                 out<-list(beta.int.est, beta.int.cov.prob, beta.diff.est, beta.diff.cov.prob, beta.x_ibar.est, beta.x_ibar.cov.prob)
+                 names(out)<-c("Intercept Estimate", "Intercept Covered", "Diff Estimate", "Diff Covered", "x_ibar Estimate", "x_ibar Covered")
+                 return(out)
+               }}
+               )
 
-pop.m<-80000 # number of clusters
-pop.n<- 5 # number within clusters
-beta1<-3 #slope for indicator 
-beta0<--1.5 #intercept terms
-tau_sq<-.5 #variance of random intercept
-reps<-10000
 
-beta.diff.est<-vector(length = reps)
-beta.diff.cov.prob<-vector(length = reps)
-beta.x_ibar.est<-vector(length = reps)
-beta.x_ibar.cov.prob<-vector(length = reps)
-beta.int.est<-vector(length = reps)
-beta.int.cov.prob<-vector(length = reps)
-for(i in 1:reps){
-  u<-rnorm(pop.m,mean = 0, sd=sqrt(tau_sq)) #cluster samples
-  u1<-rep(u,each=pop.n) # repeat each cluster sample n times
-  x<-rnorm(u1,1)
-  x<-as.numeric(x>2.5)
-  z<-beta0+beta1*x+u1
-  pr<-1/(1+exp(-z))
-  y<-rbinom(n=pop.m*pop.n,size = 1,prob = pr )
-  dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
-  agg.dat<-aggregate(y~id, dat, sum) # sum y by id
-  case.samp<-sample(agg.dat$id[agg.dat$y>=4],250) #sample cases
-  control.samp<-sample(agg.dat$id[agg.dat$y<4],250)# sample controls
-  samp<-c(case.samp, control.samp)
-  samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
-  samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
-  x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
-  samp.dat$x_ibar<-(x_ibar)
-  samp.dat$diff<-(samp.dat$x-samp.dat$x_ibar) # calculate x_ij-x_ibar
+out<-foreach(i=1:10000, .combine=cbind) %dopar% {
+  logit.sim(pop.m, pop.n, beta1,beta0,tau_sq)
   
-  fit.logit<-glmer(y~diff+x_ibar+(1|id),data = samp.dat,
-                   family = binomial(link = "logit"), 
-                   glmerControl(optimizer = c("bobyqa","Nelder_Mead")) )
-  beta.int.est[i]<-coef(summary(fit.logit))[1,1]
-  beta.int.cov.prob[i]<-((coef(summary(fit.logit))[1,1]-qt(.975, df=2000)*coef(summary(fit.logit))[1,2])<=beta0&(coef(summary(fit.logit))[1,1]+qt(.975, df=2000)*coef(summary(fit.logit))[1,2])>=beta0)
-  beta.diff.est[i]<-coef(summary(fit.logit))[2,1]
-  beta.diff.cov.prob[i]<-((coef(summary(fit.logit))[2,1]-qt(.975, df=2000)*coef(summary(fit.logit))[2,2])<=beta1&(coef(summary(fit.logit))[2,1]+qt(.975, df=2000)*coef(summary(fit.logit))[2,2])>=beta1)
-  beta.x_ibar.est[i]<-coef(summary(fit.logit))[3,1]
-  beta.x_ibar.cov.prob[i]<-((coef(summary(fit.logit))[3,1]-qt(.975, df=2000)*coef(summary(fit.logit))[3,2])<=beta1&(coef(summary(fit.logit))[3,1]+qt(.975, df=2000)*coef(summary(fit.logit))[3,2])>=beta1)
-
-  }
+}
+beta.int.est<-unlist(out[1,])
+beta.int.cov.prob<-unlist(out[2,])
+beta.diff.est<-unlist(out[3,])
+beta.diff.cov.prob<-unlist(out[4,])
+beta.x_ibar.est<-unlist(out[5,])
+beta.x_ibar.cov.prob<-unlist(out[6,]) 
 ```
 
 ```{r,echo=TRUE,eval=FALSE}
@@ -372,52 +385,67 @@ beta.int.est<-vector(length = reps)
   hist(agg.dat$y,main = "Histogram of Aggregated Sums",xlab = "Sum of Y Over Subject")
 ```
 
-```{r,echo=TRUE,cache=TRUE,eval=FALSE}
-library(lme4)
+```{r,echo=TRUE,cache=TRUE}
 set.seed(1104)
+library(foreach)
+library(doParallel)
+cores=detectCores()
+cl <- makeCluster(3) 
+registerDoParallel(cl)
+clusterEvalQ(cl,
+             {library(lme4)
+               pop.m<-80000 # number of clusters
+               pop.n<- 5 # number within clusters
+               beta1<-3 #slope for indicator 
+               beta0<--1.5 #intercept terms
+               tau_sq<-.5 #variance of random intercept
+               logit.sim<-function(pop.m, pop.n, beta1,beta0,tau_sq){
+                 library(lme4)
+                 u<-rnorm(pop.m,mean = 0, sd=sqrt(tau_sq)) #cluster samples
+                 u1<-rep(u,each=pop.n) # repeat each cluster sample n times
+                 x<-rnorm(u1,1)
+                 z<-beta0+beta1*x+u1
+                 pr<-1/(1+exp(-z))
+                 y<-rbinom(n=pop.m*pop.n,size = 1,prob = pr )
+                 dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
+                 agg.dat<-aggregate(y~id, dat, sum) # sum y by id
+                 case.samp<-sample(agg.dat$id[agg.dat$y>=4],250) #sample cases
+                 control.samp<-sample(agg.dat$id[agg.dat$y<4],250)# sample controls
+                 samp<-c(case.samp, control.samp)
+                 samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
+                 samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
+                 x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
+                 samp.dat$x_ibar<-(x_ibar)
+                 samp.dat$diff<-(samp.dat$x-samp.dat$x_ibar) # calculate x_ij-x_ibar
+                 
+                 fit.logit<-glmer(y~diff+x_ibar+(1|id),data = samp.dat,
+                                  family = binomial(link = "logit"), 
+                                  glmerControl(optimizer = c("bobyqa","Nelder_Mead")) )
+                 
+                 beta.int.est<-coef(summary(fit.logit))[1,1]
+                 beta.int.cov.prob<-((coef(summary(fit.logit))[1,1]-qt(.975, df=2000)*coef(summary(fit.logit))[1,2])<=beta0&(coef(summary(fit.logit))[1,1]+qt(.975, df=2000)*coef(summary(fit.logit))[1,2])>=beta0)
+                 beta.diff.est<-coef(summary(fit.logit))[2,1]
+                 beta.diff.cov.prob<-((coef(summary(fit.logit))[2,1]-qt(.975, df=2000)*coef(summary(fit.logit))[2,2])<=beta1&(coef(summary(fit.logit))[2,1]+qt(.975, df=2000)*coef(summary(fit.logit))[2,2])>=beta1)
+                 beta.x_ibar.est<-coef(summary(fit.logit))[3,1]
+                 beta.x_ibar.cov.prob<-((coef(summary(fit.logit))[3,1]-qt(.975, df=2000)*coef(summary(fit.logit))[3,2])<=beta1&(coef(summary(fit.logit))[3,1]+qt(.975, df=2000)*coef(summary(fit.logit))[3,2])>=beta1)
+                 out<-list(beta.int.est, beta.int.cov.prob, beta.diff.est, beta.diff.cov.prob, beta.x_ibar.est, beta.x_ibar.cov.prob)
+                 names(out)<-c("Intercept Estimate", "Intercept Covered", "Diff Estimate", "Diff Covered", "x_ibar Estimate", "x_ibar Covered")
+                 return(out)
+               }}
+)
 
-pop.m<-80000 # number of clusters
-pop.n<- 5 # number within clusters
-beta1<-3 #slope for indicator 
-beta0<--1.5 #intercept terms
-tau_sq<-.5 #variance of random intercept
-reps<-10000 
 
-beta.diff.est<-vector(length = reps)
-beta.diff.cov.prob<-vector(length = reps)
-beta.x_ibar.est<-vector(length = reps)
-beta.x_ibar.cov.prob<-vector(length = reps)
-beta.int.est<-vector(length = reps)
-beta.int.cov.prob<-vector(length = reps)
-for(i in 1:reps){
-  u<-rnorm(pop.m,mean = 0, sd=sqrt(tau_sq)) #cluster samples
-  u1<-rep(u,each=pop.n) # repeat each cluster sample n times
-  x<-rnorm(u1,1)
-  z<-beta0+beta1*x+u1
-  pr<-1/(1+exp(-z))
-  y<-rbinom(n=pop.m*pop.n,size = 1,prob = pr )
-  dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
-  agg.dat<-aggregate(y~id, dat, sum) # sum y by id
-  case.samp<-sample(agg.dat$id[agg.dat$y>=4],250) #sample cases
-  control.samp<-sample(agg.dat$id[agg.dat$y<4],250)# sample controls
-  samp<-c(case.samp, control.samp)
-  samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
-  samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
-  x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
-  samp.dat$x_ibar<-(x_ibar)
-  samp.dat$diff<-(samp.dat$x-samp.dat$x_ibar) # calculate x_ij-x_ibar
+out<-foreach(i=1:10000, .combine=cbind) %dopar% {
+  logit.sim(pop.m, pop.n, beta1,beta0,tau_sq)
   
-  fit.logit<-glmer(y~diff+x_ibar+(1|id),data = samp.dat,
-                   family = binomial(link = "logit"), 
-                   glmerControl(optimizer = c("bobyqa","Nelder_Mead")) )
-  beta.int.est[i]<-coef(summary(fit.logit))[1,1]
-  beta.int.cov.prob[i]<-((coef(summary(fit.logit))[1,1]-qt(.975, df=2000)*coef(summary(fit.logit))[1,2])<=beta0&(coef(summary(fit.logit))[1,1]+qt(.975, df=2000)*coef(summary(fit.logit))[1,2])>=beta0)
-  beta.diff.est[i]<-coef(summary(fit.logit))[2,1]
-  beta.diff.cov.prob[i]<-((coef(summary(fit.logit))[2,1]-qt(.975, df=2000)*coef(summary(fit.logit))[2,2])<=beta1&(coef(summary(fit.logit))[2,1]+qt(.975, df=2000)*coef(summary(fit.logit))[2,2])>=beta1)
-  beta.x_ibar.est[i]<-coef(summary(fit.logit))[3,1]
-  beta.x_ibar.cov.prob[i]<-((coef(summary(fit.logit))[3,1]-qt(.975, df=2000)*coef(summary(fit.logit))[3,2])<=beta1&(coef(summary(fit.logit))[3,1]+qt(.975, df=2000)*coef(summary(fit.logit))[3,2])>=beta1)
-
 }
+beta.int.est<-unlist(out[1,])
+beta.int.cov.prob<-unlist(out[2,])
+beta.diff.est<-unlist(out[3,])
+beta.diff.cov.prob<-unlist(out[4,])
+beta.x_ibar.est<-unlist(out[5,])
+beta.x_ibar.cov.prob<-unlist(out[6,])
+
 ```
 
 ```{r,echo=TRUE,eval=FALSE}
@@ -473,46 +501,58 @@ sigma<-1
 ```
 
 
-```{r, echo=TRUE,eval=FALSE}
+```{r, echo=TRUE,cache=TRUE}
 set.seed(1104)
-library(survival)
-pop.m<-80000 # number of clusters
-pop.n<- 5 # number within clusters
-beta1<-3 #slope for indicator 
-beta0<--1.5 #intercept terms
-tau_x<-0.5
-sigma<-1
-reps<-10000
+library(foreach)
+library(doParallel)
+cores=detectCores()
+cl <- makeCluster(3) 
+registerDoParallel(cl)
+clusterEvalQ(cl,
+             {library(survival)
+               pop.m<-80000 # number of clusters
+               pop.n<- 5 # number within clusters
+               beta1<-3 #slope for indicator 
+               beta0<--1.5 #intercept terms
+               tau_x<-0.5
+               sigma<-1
+               clogit.sim<-function(pop.m, pop.n, beta1,beta0,tau_x, sigma){
+                 v<-rnorm(pop.m,mean = 0, sd=sqrt(sigma*tau_x)) #cluster samples
+                 v1<-rep(v,each=pop.n) # repeat each cluster sample n times
+                 xstar<-rnorm(pop.m*pop.n,mean = 0, sd=sqrt(sigma*(1-tau_x))) # samples within each cluster
+                 x<-v1+xstar #total x
+                 x<-as.numeric(x>.75)
+                 z<-beta0+beta1*x
+                 pr<-1/(1+exp(-z))
+                 y<-rbinom(n=pop.m*pop.n,size = 1,prob = pr )
+                 dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
+                 agg.dat<-aggregate(y~id, dat, sum) # sum y by id
+                 table(agg.dat$y)
+                 case.samp<-sample(agg.dat$id[agg.dat$y>=4],250) #sample cases
+                 control.samp<-sample(agg.dat$id[agg.dat$y<4],250)# sample controls
+                 samp<-c(case.samp, control.samp)
+                 samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
+                 samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
+                 x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
+                 samp.dat$x_ibar<-(x_ibar)
+                 samp.dat$diff<-(samp.dat$x-samp.dat$x_ibar) # calculate x_ij-x_ibar
+                 table(samp.dat$diff,samp.dat$y)
+                 fit.clogit<-clogit(y ~ diff + strata(id), samp.dat)
+                 beta.diff.est<-coef(fit.clogit)[1]
+                 ci<-confint(fit.clogit)
+                 beta.diff.cov.prob<-(ci[1,1]<=beta1&ci[1,2]>=beta1)
+                 out<-list(beta.diff.est, beta.diff.cov.prob)
+                 names(out)<-c("Diff Estimate", "Diff Covered")
+                 return(out)
+               }})
 
-beta.diff.est<-vector(length = reps)
-beta.diff.cov.prob<-vector(length = reps)
-
-for(i in 1:reps){
-  v<-rnorm(pop.m,mean = 0, sd=sqrt(sigma*tau_x)) #cluster samples
-  v1<-rep(v,each=pop.n) # repeat each cluster sample n times
-  xstar<-rnorm(pop.m*pop.n,mean = 0, sd=sqrt(sigma*(1-tau_x))) # samples within each cluster
-  x<-v1+xstar #total x
-  x<-as.numeric(x>.75)
-  z<-beta0+beta1*x
-  pr<-1/(1+exp(-z))
-  y<-rbinom(n=pop.m*pop.n,size = 1,prob = pr )
-  dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
-  agg.dat<-aggregate(y~id, dat, sum) # sum y by id
-  table(agg.dat$y)
-  case.samp<-sample(agg.dat$id[agg.dat$y>=4],250) #sample cases
-  control.samp<-sample(agg.dat$id[agg.dat$y<4],250)# sample controls
-  samp<-c(case.samp, control.samp)
-  samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
-  samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
-  x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
-  samp.dat$x_ibar<-(x_ibar)
-  samp.dat$diff<-(samp.dat$x-samp.dat$x_ibar) # calculate x_ij-x_ibar
-  table(samp.dat$diff,samp.dat$y)
-  fit.clogit<-clogit(y ~ diff + strata(id), samp.dat)
-  beta.diff.est[i]<-coef(fit.clogit)[1]
-  ci<-confint(fit.clogit)
-  beta.diff.cov.prob[i]<-(ci[1,1]<=beta1&ci[1,2]>=beta1)
+out<-foreach(i=1:10000, .combine=cbind) %dopar% {
+  clogit.sim(pop.m, pop.n, beta1,beta0,tau_x, sigma)
+  
 }
+beta.diff.est<-unlist(out[1,])
+beta.diff.cov.prob<-unlist(out[2,])
+
 ```
 
 ```{r,echo=TRUE,eval=FALSE}
@@ -539,7 +579,6 @@ sigma<-1
   v1<-rep(v,each=pop.n) # repeat each cluster sample n times
   xstar<-rnorm(pop.m*pop.n,mean = 0, sd=sqrt(sigma*(1-tau_x))) # samples within each cluster
   x<-v1+xstar #total x
-  x<-as.numeric(x>.75)
   z<-beta0+beta1*x
   pr<-1/(1+exp(-z))
   y<-rbinom(n=pop.m*pop.n,size = 1,prob = pr )
@@ -559,48 +598,59 @@ sigma<-1
 ```
 
 
-```{r, echo=TRUE,eval=FALSE}
+```{r, echo=TRUE,cache=TRUE}
 set.seed(1104)
-library(survival)
-pop.m<-80000 # number of clusters
-pop.n<- 5 # number within clusters
-beta1<-3 #slope for indicator 
-beta0<--1.5 #intercept terms
-tau_x<-0.5
-sigma<-1
-reps<-10000
+library(foreach)
+library(doParallel)
+cores=detectCores()
+cl <- makeCluster(3) 
+registerDoParallel(cl)
+clusterEvalQ(cl,
+             {library(survival)
+               pop.m<-80000 # number of clusters
+               pop.n<- 5 # number within clusters
+               beta1<-3 #slope for indicator 
+               beta0<--1.5 #intercept terms
+               tau_x<-0.5
+               sigma<-1
+               clogit.sim<-function(pop.m, pop.n, beta1,beta0,tau_x, sigma){
+                 v<-rnorm(pop.m,mean = 0, sd=sqrt(sigma*tau_x)) #cluster samples
+                 v1<-rep(v,each=pop.n) # repeat each cluster sample n times
+                 xstar<-rnorm(pop.m*pop.n,mean = 0, sd=sqrt(sigma*(1-tau_x))) # samples within each cluster
+                 x<-v1+xstar #total x
+                 z<-beta0+beta1*x
+                 pr<-1/(1+exp(-z))
+                 y<-rbinom(n=pop.m*pop.n,size = 1,prob = pr )
+                 dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
+                 agg.dat<-aggregate(y~id, dat, sum) # sum y by id
+                 table(agg.dat$y)
+                 case.samp<-sample(agg.dat$id[agg.dat$y>=4],250) #sample cases
+                 control.samp<-sample(agg.dat$id[agg.dat$y<4],250)# sample controls
+                 samp<-c(case.samp, control.samp)
+                 samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
+                 samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
+                 x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
+                 samp.dat$x_ibar<-(x_ibar)
+                 samp.dat$diff<-(samp.dat$x-samp.dat$x_ibar) # calculate x_ij-x_ibar
+                 table(samp.dat$diff,samp.dat$y)
+                 fit.clogit<-clogit(y ~ diff + strata(id), samp.dat)
+                 beta.diff.est<-coef(fit.clogit)[1]
+                 ci<-confint(fit.clogit)
+                 beta.diff.cov.prob<-(ci[1,1]<=beta1&ci[1,2]>=beta1)
+                 out<-list(beta.diff.est, beta.diff.cov.prob)
+                 names(out)<-c("Diff Estimate", "Diff Covered")
+                 return(out)
+               }})
 
-beta.diff.est<-vector(length = reps)
-beta.diff.cov.prob<-vector(length = reps)
-
-for(i in 1:reps){
-  v<-rnorm(pop.m,mean = 0, sd=sqrt(sigma*tau_x)) #cluster samples
-  v1<-rep(v,each=pop.n) # repeat each cluster sample n times
-  xstar<-rnorm(pop.m*pop.n,mean = 0, sd=sqrt(sigma*(1-tau_x))) # samples within each cluster
-  x<-v1+xstar #total x
-  z<-beta0+beta1*x
-  pr<-1/(1+exp(-z))
-  y<-rbinom(n=pop.m*pop.n,size = 1,prob = pr )
-  dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
-  agg.dat<-aggregate(y~id, dat, sum) # sum y by id
-  table(agg.dat$y)
-  case.samp<-sample(agg.dat$id[agg.dat$y>=4],250) #sample cases
-  control.samp<-sample(agg.dat$id[agg.dat$y<4],250)# sample controls
-  samp<-c(case.samp, control.samp)
-  samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
-  samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
-  x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
-  samp.dat$x_ibar<-(x_ibar)
-  samp.dat$diff<-(samp.dat$x-samp.dat$x_ibar) # calculate x_ij-x_ibar
-  table(samp.dat$diff,samp.dat$y)
-  fit.clogit<-clogit(y ~ diff + strata(id), samp.dat)
-  beta.diff.est[i]<-coef(fit.clogit)[1]
-  ci<-confint(fit.clogit)
-  beta.diff.cov.prob[i]<-(ci[1,1]<=beta1&ci[1,2]>=beta1)
+out<-foreach(i=1:10000, .combine=cbind) %dopar% {
+  clogit.sim(pop.m, pop.n, beta1,beta0,tau_x, sigma)
+  
 }
+beta.diff.est<-unlist(out[1,])
+beta.diff.cov.prob<-unlist(out[2,])
 ```
 
-```{r,echo=TRUE,eval=FALSE}
+```{r,echo=TRUE}
 hist(beta.diff.est, main = "Estimates of Coefficient (x_ij-x_ibar)")
 abline(v = 3, col = "red")
 mean(beta.diff.cov.prob)
