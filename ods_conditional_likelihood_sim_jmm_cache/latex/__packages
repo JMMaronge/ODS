@@ -2,3 +2,7 @@ base
 nlme
 Matrix
 lme4
+foreach
+iterators
+doParallel
+survival

@@ -48,7 +48,7 @@ Clearly, there appears to be 2 subpopulations here, where one has many more memb
 
 The goal here is to convince myself that if we sample based off the sum of outcomes for a given subject, (here I made the number of measurements per subject equal to 5) we still get a consistent estimate of for beta. What I did here, was generate a "population" of subjects (number of subjects equals 20,000, each subject has 5 measurements) from the model above. Then I aggregate the data by taking the sum of all measurements for each subject. Then I sample 50 subjects from each group based off that sum. With the sampled data, I fit the model given above and record the estimated value of beta. I repeat this process many times and create a histogram for estimated values for the fixed effect. The code and resulting histogram are shown below.
 
-```{r,echo=TRUE,cache=TRUE}
+```{r,echo=TRUE,cache=TRUE,eval=FALSE,message=FALSE,warning=FALSE}
 library(nlme)
 set.seed(1104)
 
@@ -58,7 +58,7 @@ case.prob<-.01 #probability of case in underlying population
 beta<-5 #slope for indicator 
 sigma<- .5 #overall standard deviation in the linear model
 tau_e<-0.8 #error correlation
-reps=10000
+reps=2000
 
 
 beta.est<-vector(length = reps)
@@ -97,57 +97,65 @@ $$Y_{ij}= \beta_0 +\beta X_{ij}+U_i+\epsilon_{ij}.$$
 
 Where I set $\beta_0=0$ and $\beta=5$. The $X_{ij}$ terms are generated as follows: 1.) We generate $X_{ij}^*\sim N(U_i,1)$, 2.) We then make the terms into a binary random variable by coding $X_{ij}^*>2.5$ as 1 and 0 otherwise. The rest of the simulation is the same as above except at the end we fit a model of the form,
 $$Y_{ij}=\beta_0+\beta_1\bar{X}_{i.}+\beta_2\left(X_{ij}-\bar{X}_{i.}\right)+U_i+\epsilon_{ij}$$
-```{r, echo=TRUE, cache=TRUE}
+```{r, echo=TRUE, cache=TRUE,message=FALSE,warning=FALSE}
 ####ODS Conditional Likelihood Simulation: Jacob M. Maronge 01/09/17
 
 #### Inspired by the paper: Separating between- and within-cluster covariate effects by using conditional and partitioning methods
 #### By John M. Neuhaus and Charles E. McCulloch
-
-library(nlme)
 set.seed(1104)
+library(foreach)
+library(doParallel)
+cores=detectCores()
+cl <- makeCluster(3) 
+registerDoParallel(cl)
+clusterEvalQ(cl,
+             {library(nlme)
+               pop.m<-20000 # number of clusters
+               pop.n<- 5 # number within clusters
+               beta<-5 #slope for indicator 
+               sigma<- 1 #overall standard deviation in the linear model
+               tau_e<-0.8 #error correlation
+               norm.sim<-function(pop.m, pop.n, beta,tau_e, sigma){
+                 u<-rnorm(pop.m,mean = 0, sd=sqrt(sigma*tau_e)) #cluster samples
+                 u1<-rep(u,each=pop.n) # repeat each cluster sample n times
+                 estar<-rnorm(pop.m*pop.n,mean = 0, sd=sqrt(sigma*(1-tau_e))) # samples within each cluster
+                 err<-u1+estar #total error
+                 
+                 x<-rnorm(u1,1)
+                 x<-as.numeric(x>2.5)
+                 y<-beta*x+err
+                 dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
+                 agg.dat<-aggregate(y~id, dat, sum) # sum y by id
+                 case.samp<-sample(agg.dat$id[agg.dat$y>12],50) #sample cases
+                 control.samp<-sample(agg.dat$id[agg.dat$y<12],50)# sample controls
+                 samp<-c(case.samp, control.samp)
+                 samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
+                 samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
+                 x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
+                 samp.dat$x_ibar<-x_ibar
+                 samp.dat$diff<-samp.dat$x-samp.dat$x_ibar # calculate x_ij-x_ibar
+                 
+                 fit<-lme(y~diff+x_ibar, data = samp.dat, random = ~1|id)
+                 beta.diff.est<-fixed.effects(fit)[2]
+                 beta.diff.cov.prob<-(intervals(fit)$fixed[2,1]<=beta&intervals(fit)$fixed[2,3]>=beta)
+                 beta.x_ibar.est<-fixed.effects(fit)[3]
+                 beta.x_ibar.cov.prob<-(intervals(fit)$fixed[3,1]<=beta&intervals(fit)$fixed[3,3]>=beta)
+                 out<-list(beta.diff.est, beta.diff.cov.prob, beta.x_ibar.est,  beta.x_ibar.cov.prob)
+                 names(out)<-c("Diff Estimate", "Diff Covered","x_ibar Estimate", "x_ibar Covered")
+                 return(out)
+               }})
 
-pop.m<-20000 # number of clusters
-pop.n<- 5 # number within clusters
-beta<-5 #slope for indicator 
-sigma<- 1 #overall standard deviation in the linear model
-tau_e<-0.8 #error correlation
-reps=10000
-
-
-beta.diff.est<-vector(length = reps)
-beta.diff.cov.prob<-vector(length = reps)
-beta.x_ibar.est<-vector(length = reps)
-beta.x_ibar.cov.prob<-vector(length = reps)
-
-for(i in 1:reps){
-u<-rnorm(pop.m,mean = 0, sd=sqrt(sigma*tau_e)) #cluster samples
-u1<-rep(u,each=pop.n) # repeat each cluster sample n times
-estar<-rnorm(pop.m*pop.n,mean = 0, sd=sqrt(sigma*(1-tau_e))) # samples within each cluster
-err<-u1+estar #total error
-
-x<-rnorm(u1,1)
-x<-as.numeric(x>2.5)
-y<-beta*x+err
-dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
-agg.dat<-aggregate(y~id, dat, sum) # sum y by id
-case.samp<-sample(agg.dat$id[agg.dat$y>12],50) #sample cases
-control.samp<-sample(agg.dat$id[agg.dat$y<12],50)# sample controls
-samp<-c(case.samp, control.samp)
-samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
-samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
-x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
-samp.dat$x_ibar<-x_ibar
-samp.dat$diff<-samp.dat$x-samp.dat$x_ibar # calculate x_ij-x_ibar
-
-fit<-lme(y~diff+x_ibar, data = samp.dat, random = ~1|id)
-beta.diff.est[i]<-fixed.effects(fit)[2]
-beta.diff.cov.prob[i]<-(intervals(fit)$fixed[2,1]<=beta&intervals(fit)$fixed[2,3]>=beta)
-beta.x_ibar.est[i]<-fixed.effects(fit)[3]
-beta.x_ibar.cov.prob[i]<-(intervals(fit)$fixed[3,1]<=beta&intervals(fit)$fixed[3,3]>=beta)
+out<-foreach(i=1:2000, .combine=cbind) %dopar% {
+  norm.sim(pop.m, pop.n, beta,tau_e, sigma)
+  
 }
+beta.diff.est<-unlist(out[1,])
+beta.diff.cov.prob<-unlist(out[2,])
+beta.x_ibar.est <- unlist(out[3,])
+beta.x_ibar.cov.prob<-unlist(out[4,])
 ```
 
-```{r,echo=TRUE}
+```{r,echo=TRUE,message=FALSE,warning=FALSE}
 hist(beta.diff.est)
 abline(v = 5, col = "red")
 mean(beta.diff.cov.prob)
@@ -159,51 +167,61 @@ mean(beta.x_ibar.cov.prob)
 ####Continuous X
 Here I generate the same model as above, except I don't convert the X's to discrete values.
 
-```{r, echo=TRUE, cache=TRUE}
-library(nlme)
+```{r, echo=TRUE, cache=TRUE,message=FALSE,warning=FALSE}
 set.seed(1104)
+library(foreach)
+library(doParallel)
+cores=detectCores()
+cl <- makeCluster(3) 
+registerDoParallel(cl)
+clusterEvalQ(cl,
+             {library(nlme)
+               pop.m<-20000 # number of clusters
+               pop.n<- 5 # number within clusters
+               beta<-5 #slope for indicator 
+               sigma<- 1 #overall standard deviation in the linear model
+               tau_e<-0.8 #error correlation
+               norm.sim<-function(pop.m, pop.n, beta,tau_e, sigma){
+                 u<-rnorm(pop.m,mean = 0, sd=sqrt(sigma*tau_e)) #cluster samples
+                 u1<-rep(u,each=pop.n) # repeat each cluster sample n times
+                 estar<-rnorm(pop.m*pop.n,mean = 0, sd=sqrt(sigma*(1-tau_e))) # samples within each cluster
+                 err<-u1+estar #total error
+                 
+                 x<-rnorm(u1,1)
+                 y<-beta*x+err
+                 dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
+                 agg.dat<-aggregate(y~id, dat, sum) # sum y by id
+                 case.samp<-sample(agg.dat$id[agg.dat$y>12],50) #sample cases
+                 control.samp<-sample(agg.dat$id[agg.dat$y<12],50)# sample controls
+                 samp<-c(case.samp, control.samp)
+                 samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
+                 samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
+                 x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
+                 samp.dat$x_ibar<-x_ibar
+                 samp.dat$diff<-samp.dat$x-samp.dat$x_ibar # calculate x_ij-x_ibar
+                 
+                 fit<-lme(y~diff+x_ibar, data = samp.dat, random = ~1|id)
+                 beta.diff.est<-fixed.effects(fit)[2]
+                 beta.diff.cov.prob<-(intervals(fit)$fixed[2,1]<=beta&intervals(fit)$fixed[2,3]>=beta)
+                 beta.x_ibar.est<-fixed.effects(fit)[3]
+                 beta.x_ibar.cov.prob<-(intervals(fit)$fixed[3,1]<=beta&intervals(fit)$fixed[3,3]>=beta)
+                 out<-list(beta.diff.est, beta.diff.cov.prob, beta.x_ibar.est,  beta.x_ibar.cov.prob)
+                 names(out)<-c("Diff Estimate", "Diff Covered","x_ibar Estimate", "x_ibar Covered")
+                 return(out)
+               }})
 
-pop.m<-20000 # number of clusters
-pop.n<- 5 # number within clusters
-beta<-5 #slope for indicator 
-sigma<- 1 #overall standard deviation in the linear model
-tau_e<-0.8 #error correlation
-reps=10000
-
-
-beta.diff.est<-vector(length = reps)
-beta.diff.cov.prob<-vector(length = reps)
-beta.x_ibar.est<-vector(length = reps)
-beta.x_ibar.cov.prob<-vector(length = reps)
-
-for(i in 1:reps){
-u<-rnorm(pop.m,mean = 0, sd=sqrt(sigma*tau_e)) #cluster samples
-u1<-rep(u,each=pop.n) # repeat each cluster sample n times
-estar<-rnorm(pop.m*pop.n,mean = 0, sd=sqrt(sigma*(1-tau_e))) # samples within each cluster
-err<-u1+estar #total error
-
-x<-rnorm(u1,1)
-y<-beta*x+err
-dat<-data.frame(y=y,x=x,id=rep(c(1:pop.m),each=pop.n)) #make data
-agg.dat<-aggregate(y~id, dat, sum) # sum y by id
-case.samp<-sample(agg.dat$id[agg.dat$y>12],50) #sample cases
-control.samp<-sample(agg.dat$id[agg.dat$y<12],50)# sample controls
-samp<-c(case.samp, control.samp)
-samp.dat<-subset(dat,dat$id%in%samp) # get dataframe for sampled ids
-samp.agg.dat<-aggregate(x~id, samp.dat, mean) #calculate means for x
-x_ibar<-rep(samp.agg.dat$x,each=pop.n) # mach means dimensions with dat
-samp.dat$x_ibar<-x_ibar
-samp.dat$diff<-samp.dat$x-samp.dat$x_ibar # calculate x_ij-x_ibar
-
-fit<-lme(y~diff+x_ibar, data = samp.dat, random = ~1|id)
-beta.diff.est[i]<-fixed.effects(fit)[2]
-beta.diff.cov.prob[i]<-(intervals(fit)$fixed[2,1]<=beta&intervals(fit)$fixed[2,3]>=beta)
-beta.x_ibar.est[i]<-fixed.effects(fit)[3]
-beta.x_ibar.cov.prob[i]<-(intervals(fit)$fixed[3,1]<=beta&intervals(fit)$fixed[3,3]>=beta)
+out<-foreach(i=1:2000, .combine=cbind) %dopar% {
+  norm.sim(pop.m, pop.n, beta,tau_e, sigma)
+  
 }
+beta.diff.est<-unlist(out[1,])
+beta.diff.cov.prob<-unlist(out[2,])
+beta.x_ibar.est <- unlist(out[3,])
+beta.x_ibar.cov.prob<-unlist(out[4,])
+
 ```
 
-```{r, echo=TRUE}
+```{r, echo=TRUE,message=FALSE,warning=FALSE}
 hist(beta.diff.est)
 abline(v = 5, col = "red")
 mean(beta.diff.cov.prob)
@@ -236,7 +254,7 @@ $$\text{logit}(Y_{ij})=\beta_0+\beta_1\bar{X}_{i.}+\beta_2\left(X_{ij}-\bar{X}_{
 
 Below, I show some plots from one repetition of my simulation. 
 
-```{r,echo=FALSE}
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
 library(lme4)
 set.seed(1104)
 
@@ -245,7 +263,7 @@ pop.n<- 5 # number within clusters
 beta1<-3 #slope for indicator 
 beta0<--1.5 #intercept terms
 tau_sq<-0.5 #variance of random intercept
-reps=10000
+reps=2000
 beta.diff.est<-vector(length = reps)
 beta.x_ibar.est<-vector(length = reps)
 beta.int.est<-vector(length = reps)
@@ -270,7 +288,7 @@ beta.int.est<-vector(length = reps)
   hist(agg.dat$y,main = "Histogram of Aggregated Sums",xlab = "Sum of Y Over Subject")
 ```
   
-```{r,echo=TRUE,cache=TRUE}
+```{r,echo=TRUE,cache=TRUE,message=FALSE,warning=FALSE}
 set.seed(1104)
 library(foreach)
 library(doParallel)
@@ -320,7 +338,7 @@ clusterEvalQ(cl,
                )
 
 
-out<-foreach(i=1:10000, .combine=cbind) %dopar% {
+out<-foreach(i=1:2000, .combine=cbind) %dopar% {
   logit.sim(pop.m, pop.n, beta1,beta0,tau_sq)
   
 }
@@ -332,7 +350,7 @@ beta.x_ibar.est<-unlist(out[5,])
 beta.x_ibar.cov.prob<-unlist(out[6,]) 
 ```
 
-```{r,echo=TRUE,eval=FALSE}
+```{r,echo=TRUE,eval=TRUE}
 hist(beta.int.est,main = "Histogram of intercept estimates",xlim = c(-1.5,0))
 abline(v = -1.5, col = "red")
 mean(beta.int.cov.prob)
@@ -352,7 +370,7 @@ Here I generate the same model as above, except I don't convert the X's to discr
 
 Below, I show some plots from one repetition of my simulation. 
 
-```{r,echo=FALSE}
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
 library(lme4)
 set.seed(1104)
 
@@ -361,7 +379,7 @@ pop.n<- 5 # number within clusters
 beta1<-3 #slope for indicator 
 beta0<--1.5 #intercept terms
 tau_sq<-0.5 #variance of random intercept
-reps=10000
+reps=2000
 beta.diff.est<-vector(length = reps)
 beta.x_ibar.est<-vector(length = reps)
 beta.int.est<-vector(length = reps)
@@ -385,7 +403,7 @@ beta.int.est<-vector(length = reps)
   hist(agg.dat$y,main = "Histogram of Aggregated Sums",xlab = "Sum of Y Over Subject")
 ```
 
-```{r,echo=TRUE,cache=TRUE}
+```{r,echo=TRUE,cache=TRUE,message=FALSE,warning=FALSE}
 set.seed(1104)
 library(foreach)
 library(doParallel)
@@ -435,7 +453,7 @@ clusterEvalQ(cl,
 )
 
 
-out<-foreach(i=1:10000, .combine=cbind) %dopar% {
+out<-foreach(i=1:2000, .combine=cbind) %dopar% {
   logit.sim(pop.m, pop.n, beta1,beta0,tau_sq)
   
 }
@@ -448,7 +466,7 @@ beta.x_ibar.cov.prob<-unlist(out[6,])
 
 ```
 
-```{r,echo=TRUE,eval=FALSE}
+```{r,echo=TRUE,message=FALSE,warning=FALSE}
 hist(beta.int.est,main = "Histogram of intercept estimates",xlim = c(-1.5,0))
 abline(v = -1.5, col = "red")
 mean(beta.int.cov.prob)
@@ -467,7 +485,7 @@ mean(beta.int.cov.prob)
 
 Below, I show some plots from one repetition of my simulation. 
 
-```{r,echo=FALSE}
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
 library(survival)
 set.seed(1104)
 
@@ -501,7 +519,7 @@ sigma<-1
 ```
 
 
-```{r, echo=TRUE,cache=TRUE}
+```{r, echo=TRUE,cache=TRUE,message=FALSE,warning=FALSE}
 set.seed(1104)
 library(foreach)
 library(doParallel)
@@ -546,7 +564,7 @@ clusterEvalQ(cl,
                  return(out)
                }})
 
-out<-foreach(i=1:10000, .combine=cbind) %dopar% {
+out<-foreach(i=1:2000, .combine=cbind) %dopar% {
   clogit.sim(pop.m, pop.n, beta1,beta0,tau_x, sigma)
   
 }
@@ -555,7 +573,7 @@ beta.diff.cov.prob<-unlist(out[2,])
 
 ```
 
-```{r,echo=TRUE,eval=FALSE}
+```{r,echo=TRUE,eval=TRUE,message=FALSE,warning=FALSE}
 hist(beta.diff.est, main = "Estimates of Coefficient (x_ij-x_ibar)")
 abline(v = 3, col = "red")
 mean(beta.diff.cov.prob)
@@ -565,7 +583,7 @@ mean(beta.diff.cov.prob)
 
 Below, I show some plots from one repetition of my simulation. 
 
-```{r,echo=FALSE}
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
 library(survival)
 set.seed(1104)
 
@@ -598,7 +616,7 @@ sigma<-1
 ```
 
 
-```{r, echo=TRUE,cache=TRUE}
+```{r, echo=TRUE,cache=TRUE,message=FALSE,warning=FALSE}
 set.seed(1104)
 library(foreach)
 library(doParallel)
@@ -642,7 +660,7 @@ clusterEvalQ(cl,
                  return(out)
                }})
 
-out<-foreach(i=1:10000, .combine=cbind) %dopar% {
+out<-foreach(i=1:2000, .combine=cbind) %dopar% {
   clogit.sim(pop.m, pop.n, beta1,beta0,tau_x, sigma)
   
 }
@@ -650,7 +668,7 @@ beta.diff.est<-unlist(out[1,])
 beta.diff.cov.prob<-unlist(out[2,])
 ```
 
-```{r,echo=TRUE}
+```{r,echo=TRUE,message=FALSE,warning=FALSE}
 hist(beta.diff.est, main = "Estimates of Coefficient (x_ij-x_ibar)")
 abline(v = 3, col = "red")
 mean(beta.diff.cov.prob)
