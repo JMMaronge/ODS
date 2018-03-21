@@ -108,7 +108,7 @@ library(doParallel)
 cores=detectCores()
 cl <- makeCluster(3) 
 registerDoParallel(cl)
-clusterEvalQ(cl,
+dontprint <- clusterEvalQ(cl,
              {library(nlme)
                pop.m<-20000 # number of clusters
                pop.n<- 5 # number within clusters
@@ -174,7 +174,7 @@ library(doParallel)
 cores=detectCores()
 cl <- makeCluster(3) 
 registerDoParallel(cl)
-clusterEvalQ(cl,
+dontprint <- clusterEvalQ(cl,
              {library(nlme)
                pop.m<-20000 # number of clusters
                pop.n<- 5 # number within clusters
@@ -294,7 +294,7 @@ library(foreach)
 library(doParallel)
 cl <- makeCluster(3)  #not to overload your computer
 registerDoParallel(cl)
-clusterEvalQ(cl,
+dontprint <- clusterEvalQ(cl,
              {library(lme4)
                pop.m<-80000 # number of clusters
                pop.n<- 5 # number within clusters
@@ -359,7 +359,7 @@ abline(v = 3, col = "red")
 mean(beta.diff.cov.prob)
 hist(beta.x_ibar.est, main = "Coefficient of x_ibar Estimates")
 abline(v = 3, col = "red")
-mean(beta.int.cov.prob)
+mean(beta.x_ibar.cov.prob)
 ```
 
 The vertical red lines are drawn at the true value for each parameter. The intercept term appears to be biased, as well as the between-subject effect, and possibly also the within-subject effect.
@@ -410,7 +410,7 @@ library(doParallel)
 cores=detectCores()
 cl <- makeCluster(3) 
 registerDoParallel(cl)
-clusterEvalQ(cl,
+dontprint <- clusterEvalQ(cl,
              {library(lme4)
                pop.m<-80000 # number of clusters
                pop.n<- 5 # number within clusters
@@ -475,7 +475,7 @@ abline(v = 3, col = "red")
 mean(beta.diff.cov.prob)
 hist(beta.x_ibar.est, main = "Coefficient of x_ibar Estimates")
 abline(v = 3, col = "red")
-mean(beta.int.cov.prob)
+mean(beta.x_ibar.cov.prob)
 ```
 
 ###Conditional logistic regression
@@ -526,7 +526,7 @@ library(doParallel)
 cores=detectCores()
 cl <- makeCluster(3) 
 registerDoParallel(cl)
-clusterEvalQ(cl,
+dontprint <- clusterEvalQ(cl,
              {library(survival)
                pop.m<-80000 # number of clusters
                pop.n<- 5 # number within clusters
@@ -623,7 +623,7 @@ library(doParallel)
 cores=detectCores()
 cl <- makeCluster(3) 
 registerDoParallel(cl)
-clusterEvalQ(cl,
+dontprint <- clusterEvalQ(cl,
              {library(survival)
                pop.m<-80000 # number of clusters
                pop.n<- 5 # number within clusters
